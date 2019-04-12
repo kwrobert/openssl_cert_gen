@@ -5,7 +5,7 @@ FROM ubuntu:bionic
 WORKDIR /app
 
 # Copy the current directory contents into the container at /app
-COPY . /app
+COPY cert_gen.py /app
 
 # Install any needed packages specified in requirements.txt
 RUN apt update && apt install -y openssl python3.7 python3-pip
