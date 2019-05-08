@@ -9,8 +9,7 @@
 # because the Dockerfile sets /app as the working directory for the cert
 # generation script and expects certain input files to be there and places all
 # output files there 
-docker run -d \
-  -it \
-  # --name openssl_test \
+docker run -it \
   --mount type=bind,source="$(pwd)",target=/app \
-  openssl_tool:v0.1
+  openssl_tool:latest
+  # --name openssl_test \

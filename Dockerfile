@@ -9,7 +9,7 @@ COPY cert_gen.py /app
 
 # Install any needed packages specified in requirements.txt
 RUN apt update && apt install -y openssl python3.7 python3-pip
-RUN pip3 install bullet inquirer
+RUN pip3 install bullet inquirer certsrv
 
 # Make ssh port 22 available to the world outside this container
 EXPOSE 22
