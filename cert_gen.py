@@ -17,85 +17,47 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support import expected_conditions as EC
 
 class MicrosoftCA:
-
-
-    def __init__(self, fqdn, user, passwd):
+    def __init__(self, fqdn, user, passwd, download_dir=None):
         opts = Options()
+        if download_dir is not None:
+            print(f"Changing download dir to {download_dir}!")
+            prefs = {"download.default_directory": download_dir}
+            opts.add_experimental_option("prefs", prefs)
         # opts.set_headless()
         # assert opts.headless
         self.browser = Chrome(options=opts)
         self.wait = WebDriverWait(self.browser, 100)
         self.URL = "https://{}:{}@{}/certsrv".format(user, passwd, fqdn)
+
+    def navigate_to_homepage(self):
         self.browser.get(self.URL)
 
-    def open_time_entry_sheet(self):
+    def navigate_to_cert_sign_page_from_homepage(self):
+        self.browser.find_element_by_link_text("Request a certificate").click()
+        self.browser.find_element_by_link_text("advanced certificate request").click()
+
+    def fill_out_signing_page_and_download(self, cert_contents, cert_template):
         """
-        Open the time entry sheet for the first time, starting from the homepage
+        Fills out cert signing page and downloads signed cert and cert chain
         """
-        # TODO: Validate we are at the homepage before attempting this
-        self.wait.until(EC.element_to_be_clickable((By.ID, "openTimeEntry")))
-        button = self.browser.find_element_by_id("openTimeEntry")
-        result = button.click()
-        print(result)
 
-    def _check_so_list(self, so_num):
-        """
-        Check the SO drop down on the time entry page for the given SO number
-        """
-        print("so_num = {}".format(so_num))
-        # self.wait.until(EC.element_to_be_clickable((By.NAME, "select-so")))
-        # sel_el = self.browser.find_element_by_name("select-so")
-        # print(sel_el)
-        # print("sel_el.text = {}".format(sel_el.text))
-        # actions = ActionChains(self.browser)
-        # actions.pause(2)
-        # actions.move_to_element_with_offset(sel_el, 2, 2)
-        # actions.pause(2)
-        # actions.click(sel_el)
-        # result = actions.perform()
-        # select_obj = Select(sel_el)
-        # print(select_obj.options)
-
-        div = self.browser.find_element_by_name("cont_with_so")
-        print("div = {}".format(div))
-
-
-        # element = self.browser.find_element_by_xpath("//select[@name='select-so']")
-        # print("element = {}".format(element))
-        # all_options = element.find_elements_by_tag_name("option")
-        # print("all_options = {}".format(all_options))
-        # for option in all_options:
-        #     print("Value is: %s" % option.get_attribute("value"))
-            # option.click()
-        # el.click()
-        # options = el.find_elements_by_tag_name("option")
-        # print(options)
-
-        import pdb
-        pdb.set_trace()  # XXX BREAKPOINT
-
-    def _toggle_form(self):
-        # self.wait.until(EC.element_to_be_clickable((By.ID, "control_connect2")))
-        # el = self.browser.find_element_by_id("control_connect2")
-        el = self.browser.find_element_by_css_selector(
-            "input#control_connect2.widget-switch.checkbox-sw.checkbox"
-        )
-        print(el)
-        print(el.get_attribute("name"))
-        actions = ActionChains(self.browser)
-        actions.move_to_element(el)
-        actions.click(el)
-        result = actions.perform()
-        print("result = {}".format(result))
-
-    def create_entry(self, event):
-        # First check if the SO is in the SO dropdown list. This determines whether or
-        # not we continue with the default form or use a "custom" form
-        # self._toggle_form()
-        if self._check_so_list(event.so_number):
-            print("Use default form!")
+        print("Fill out page")
+        # Fill out text area with cert contents
+        text_area = self.browser.find_element_by_id("locTaRequest")
+        text_area.send_keys(cert_contents)
+        # Select the cert tempalte
+        template_select = Select(self.browser.find_element_by_id("lbCertTemplateID"))
+        for opt in template_select.options:
+            if opt.text == cert_template:
+                opt.click()
+                break
         else:
-            print("Use custom form!")
+            raise RuntimeError(f"Not certificate templates named {cert_template}")
+        self.browser.find_element_by_id("btnSubmit").click()
+        # Select base 64 encoded and download
+        self.browser.find_element_by_id("rbB64Enc").click()
+        self.browser.find_element_by_link_text("Download certificate").click()
+        self.browser.find_element_by_link_text("Download certificate chain").click()
 
 # log.basicConfig(filename='cert_gen.log',level=log.DEBUG)
 
@@ -127,7 +89,7 @@ def validate_subjaltname(answers, current):
     valid = True
     for s in current.split(","):
         if not (s[0:4] == "DNS:" or s[0:3] == "IP:"):
-            print("Name {} invalid. Must begin with 'DNS:' or 'IP:'")
+            print("Name {} invalid. Must begin with 'DNS:' or 'IP:'".format(s))
             valid = False
             break
     return valid 
@@ -208,7 +170,7 @@ def convert_ca_cert_chain_to_base64_pem(infile, outfile=''):
 def submit_all_csrs_to_microsoft_ca(csr_dir):
     """
     Looks for all CSR files under `csr_dir` recursively and submits a Certificate
-    Signing Request to a Microsoft CA
+    Signing Request to a Microsoft CA for each CSR found
     """
 
     # This submits the CSR to the CA for the environment. The CA signing the
@@ -219,16 +181,44 @@ def submit_all_csrs_to_microsoft_ca(csr_dir):
     #   inquirer.Text('password', message="Domain Admin Password"),
     # ]
     # srv_info = inquirer.prompt(questions)
-    srv_info = {"fqdn": "ca2.vcloud.wei", "username": "kr", "password": "Worldcom1"}
+    srv_info = {
+        "fqdn": "ca1.messier.local",
+        "username": "kwr_admin",
+        "password": "W0rldc0m2018",
+    }
     # ca_srvr = certsrv.Certsrv(srv_info["fqdn"], srv_info["username"],
     #         srv_info["password"])
-    ca_srvr = MicrosoftCA(srv_info['fqdn'], srv_info["username"], srv_info["password"])
-    input("Continue?")
-    csr_files = glob.glob(os.path.join(csr_dir, '**', '*.csr'))
+    csr_files = glob.glob(os.path.join(csr_dir, "**", "*.csr"))
     print("csr_files = {}".format(csr_files))
+    download_dir = os.path.abspath(os.path.split(csr_files[0])[0])
+    ca_srvr = MicrosoftCA(
+        srv_info["fqdn"],
+        srv_info["username"],
+        srv_info["password"],
+        download_dir=download_dir,
+    )
     # for csr in csr_files:
     #     cert = ca_srvr.get_cert(csr, "Administrator")
     #     print(cert)
+    for csr_file in csr_files:
+        # Download the certs from CA page
+        with open(csr_file, "r") as f:
+            cert_contents = f.read()
+        ca_srvr.navigate_to_homepage()
+        ca_srvr.navigate_to_cert_sign_page_from_homepage()
+        ca_srvr.fill_out_signing_page_and_download(cert_contents, "Web Server")
+        # wait to finish downloading before moving
+        time.sleep(2)
+        # Rename downloaded certs
+        csr_file_name_with_ext = os.path.split(csr_file)[-1]
+        csr_file_name = os.path.splitext(csr_file_name_with_ext)[0]
+        signed_cert_download_path = os.path.join(download_dir, "certnew.cer")
+        cert_chain_download_path = os.path.join(download_dir, "certnew.p7b")
+        signed_cert_new_name = os.path.join(download_dir, f"{csr_file_name}_signed_cert.cer")
+        cert_chain_new_name = os.path.join(download_dir, f"{csr_file_name}_cert_chain.p7b")
+        shutil.move(signed_cert_download_path, signed_cert_new_name)
+        shutil.move(cert_chain_download_path, cert_chain_new_name)
+    ca_srvr.browser.quit()
 
 def generate_self_signed_certs(csr_dir):
     """
@@ -237,7 +227,7 @@ def generate_self_signed_certs(csr_dir):
     print("csr_files = {}".format(csr_files))
     for csr in csr_files:
         name, ext = os.path.splitext(csr)
-        certfile = name + ".pem"
+        certfile = name + ".cert"
         keyfile = name + ".key"
         cmd = "openssl x509 -in {} -out {} -req -signkey {} -days 1001".format(csr, certfile, keyfile)
         subprocess.check_output(cmd, shell=True)
@@ -283,7 +273,7 @@ def main():
             print("Generating vRealize Automation Certs ...")
             distrib = False
             if "Distributed" in soln:
-                names = ("IaaS", "IaaS-Manager", "VCAC")
+                names = ("IaaS-Web", "IaaS-Manager", "VCAC")
             else:
                 names = ("IaaS", "VCAC")
             for name in names:

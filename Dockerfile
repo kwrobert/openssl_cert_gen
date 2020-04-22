@@ -8,8 +8,11 @@ WORKDIR /app
 COPY cert_gen.py /app
 
 # Install any needed packages specified in requirements.txt
-RUN apt update && apt install -y openssl python3.7 python3-pip
-RUN pip3 install bullet inquirer certsrv
+ADD install-chromedriver.sh /
+RUN apt update && apt install -y openssl python3.7 python3-pip curl
+RUN pip3 install bullet inquirer selenium 
+RUN chmod +x /install-chromedriver.sh
+RUN /install-chromedriver.sh
 
 # Make ssh port 22 available to the world outside this container
 EXPOSE 22
