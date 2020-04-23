@@ -8,7 +8,10 @@ import copy
 import glob
 import time
 import shutil
+import configparser
+import sys
 
+import argparse as ap
 
 from selenium.webdriver import Chrome
 from selenium.webdriver.chrome.options import Options
@@ -18,6 +21,40 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support import expected_conditions as EC
 
+map_soln_to_csr_names = {
+    "vRealize_Automation_Medium_Distributed": [
+        "IaaS-Web",
+        "IaaS-Manager",
+        "Appliances",
+    ],
+    "vRealize_Automation_Small": ["IaaS", "Appliances"],
+    "vRealize_Business": ["vBusiness"],
+    "vRealize_Operations": ["vROPS"],
+}
+
+
+conf_template = """
+[ req ]
+default_bits = 2048
+default_keyfile = {solution_name}.key
+distinguished_name = req_distinguished_name
+encrypt_key = no
+prompt = no
+string_mask = nombstr
+req_extensions = v3_req
+[ v3_req ]
+basicConstraints = CA:FALSE
+keyUsage = digitalSignature, keyEncipherment, dataEncipherment, nonRepudiation
+extendedKeyUsage = serverAuth, clientAuth
+subjectAltName = {subjectAltName}
+[ req_distinguished_name ]
+countryName = {countryName}
+stateOrProvinceName = {stateOrProvinceName}
+localityName = {localityName}
+0.organizationName = {organizationName}
+organizationalUnitName = {organizationalUnitName}
+commonName = {commonName}
+"""
 
 class MicrosoftCA:
     def __init__(self, fqdn, user, passwd, download_dir=None):
@@ -65,35 +102,13 @@ class MicrosoftCA:
 
 # log.basicConfig(filename='cert_gen.log',level=log.DEBUG)
 
-conf_template = """
-[ req ]
-default_bits = 2048
-default_keyfile = solution_name.key
-distinguished_name = req_distinguished_name
-encrypt_key = no
-prompt = no
-string_mask = nombstr
-req_extensions = v3_req
-[ v3_req ]
-basicConstraints = CA:FALSE
-keyUsage = digitalSignature, keyEncipherment, dataEncipherment, nonRepudiation
-extendedKeyUsage = serverAuth, clientAuth
-subjectAltName = {subjectAltName}
-[ req_distinguished_name ]
-countryName = {countryName}
-stateOrProvinceName = {stateOrProvinceName}
-localityName = {localityName}
-0.organizationName = {organizationName}
-organizationalUnitName = {organizationalUnitName}
-commonName = {commonName}
-"""
 
 
 def validate_subjaltname(answers, current):
     valid = True
     for s in current.split(","):
         if not (s[0:4] == "DNS:" or s[0:3] == "IP:"):
-            print("Name {} invalid. Must begin with 'DNS:' or 'IP:'".format(s))
+            print("\nName {} invalid. Must begin with 'DNS:' or 'IP:'".format(s))
             valid = False
             break
     return valid
@@ -107,32 +122,19 @@ def validate_countryname(answers, current):
     return valid
 
 
-def generate_new_csr_and_key(outdir, name, common_conf):
+def generate_new_csr_and_key(outdir, name, config):
     """
     Generate a new certificate configuration and certificate in `outdir` using `name`
     for the name of all files without the extension
     """
 
     print("Generating csr and key {}".format(name))
-    conf = copy.copy(common_conf)
-    questions = [
-        inquirer.Text("commonName", message="commonName"),
-        inquirer.Text(
-            "subjectAltName",
-            message="subjectAltName (can be a csv)",
-            validate=validate_subjaltname,
-        ),
-    ]
-    conf.update(inquirer.prompt(questions))
-    # Must add the common name to the list of subject alternate names
-    conf["subjectAltName"] = "DNS:" + conf["commonName"] + "," + conf["subjectAltName"]
-    print("conf = {}".format(conf))
     # Write the config file
     conf_path = os.path.join(outdir, name + ".cfg")
     key_path = os.path.join(outdir, name + ".key.encrypted")
     csr_path = os.path.join(outdir, name + ".csr")
     with open(conf_path, "w") as f:
-        f.write(conf_template.format(**conf))
+        f.write(conf_template.format(solution_name=name, **config))
     # Make the keys
     cmd = (
         "openssl req -new -nodes -out {csr_path} -keyout {key_path} -config "
@@ -179,38 +181,29 @@ def convert_ca_cert_chain_to_base64_pem(infile, outfile=""):
     return outfile
 
 
-def submit_all_csrs_to_microsoft_ca(csr_dir):
+def submit_all_csrs_to_microsoft_ca(csr_dir, config):
     """
     Looks for all CSR files under `csr_dir` recursively and submits a Certificate
     Signing Request to a Microsoft CA for each CSR found
     """
 
+    info = config["DEFAULT"]
+
+    assert "microsoft_ca_address" in info
+    assert "microsoft_ca_username" in info
+    assert "microsoft_ca_password" in info
+    print("info = {}".format(dict(info)))
+
     # This submits the CSR to the CA for the environment. The CA signing the
     # private keys created above so people know we are who we say we are
-    # questions = [
-    #   inquirer.Text('fqdn', message="CA Server FQDN"),
-    #   inquirer.Text('username', message="Domain Admin Username"),
-    #   inquirer.Text('password', message="Domain Admin Password"),
-    # ]
-    # srv_info = inquirer.prompt(questions)
-    srv_info = {
-        "fqdn": "ca1.messier.local",
-        "username": "kwr_admin",
-        "password": "W0rldc0m2018",
-    }
-    # ca_srvr = certsrv.Certsrv(srv_info["fqdn"], srv_info["username"],
-    #         srv_info["password"])
     csr_files = glob.glob(os.path.join(csr_dir, "**", "*.csr"))
     print("csr_files = {}".format(csr_files))
     ca_srvr = MicrosoftCA(
-        srv_info["fqdn"],
-        srv_info["username"],
-        srv_info["password"],
+        info["microsoft_ca_address"],
+        info["microsoft_ca_username"],
+        info["microsoft_ca_password"],
         download_dir=csr_dir,
     )
-    # for csr in csr_files:
-    #     cert = ca_srvr.get_cert(csr, "Administrator")
-    #     print(cert)
     for csr_file in csr_files:
         # Download the certs from CA page
         with open(csr_file, "r") as f:
@@ -219,7 +212,7 @@ def submit_all_csrs_to_microsoft_ca(csr_dir):
         ca_srvr.navigate_to_cert_sign_page_from_homepage()
         ca_srvr.fill_out_signing_page_and_download(cert_contents, "Web Server")
         # wait to finish downloading before moving
-        time.sleep(2)
+        time.sleep(3)
         # Rename downloaded certs
         existing_certs = glob.glob(os.path.join(csr_dir, "**", "*certnew*"))
         for old_cert in existing_certs:
@@ -241,10 +234,10 @@ def submit_all_csrs_to_microsoft_ca(csr_dir):
         # format
         convert_ca_cert_chain_to_base64_pem(cert_chain_new_name)
     ca_srvr.browser.quit()
-    return 
+    return
 
 
-def generate_self_signed_certs(csr_dir):
+def generate_self_signed_certs(csr_dir, config):
     """
     """
     csr_files = glob.glob(os.path.join(csr_dir, "**", "*.csr"))
@@ -259,25 +252,10 @@ def generate_self_signed_certs(csr_dir):
         subprocess.check_output(cmd, shell=True)
 
 
-def main():
-
-    map_soln_to_csr_names = {
-        "vRealize_Automation_Medium_Distributed": ["IaaS-Web", "IaaS-Manager", "Appliances"],
-        "vRealize_Automation_Small": ["IaaS", "Appliances"],
-        "vRealize_Business": ["vBusiness"],
-        "vRealize_Operations": ["vROPS"],
-    }
-    questions = [
-        inquirer.Checkbox(
-            "solns",
-            message="What solutions are you deploying (select multiple with spacebar)?",
-            choices=list(map_soln_to_csr_names.keys()),
-        )
-    ]
-    answers = inquirer.prompt(questions)
-    answers["solns"] = [el.replace(" ", "_") for el in answers["solns"]]
-
-    print("Enter configurations common to all certs below:")
+def prompt_user_for_inputs():
+    config = {}
+    # Get common cert config
+    print("Enter configuration common to all certs below:")
     questions = [
         inquirer.Text(
             "countryName", message="countryName", validate=validate_countryname
@@ -286,50 +264,130 @@ def main():
         inquirer.Text("localityName", message="localityName"),
         inquirer.Text("organizationName", message="organizationName"),
         inquirer.Text("organizationalUnitName", message="organizationalUnitName"),
-        # inquirer.Text('commonName', message="commonName"),
     ]
-    # answers["sslconfig"] = inquirer.prompt(questions)
-    answers["sslconfig"] = {"countryName": "US",
-                            "stateOrProvinceName": "NH",
-                            "localityName": "Salem",
-                            "organizationName": "WEI",
-                            "organizationalUnitName": "Eng"}
-    print("answers = {}".format(answers))
+    config["DEFAULT"].update(inquirer.prompt(questions))
+    # Get certificate authority
+    questions = [
+        inquirer.List(
+            "ca",
+            message="What kind of certificate authority are you using?",
+            choices=["self_signed", "microsoft_ca"],
+        )
+    ]
+    answers = inquirer.prompt(questions)
+    config["DEFAULT"]["ca"] = answers["ca"]
+    if answers["ca"] == "microsoft_ca":
+        questions = [
+            inquirer.Text("microsoft_ca_address", message="Enter Microsoft CA IP or FQDN"),
+            inquirer.Text("microsoft_ca_username", message="Enter Microsoft CA username"),
+            inquirer.Text("microsoft_ca_password", message="Enter Microsoft CA password"),
+        ]
+        answers = inquirer.prompt(questions)
+        config["DEFAULT"].update(answers)
+    # Collect solutions and get their config
+    questions = [
+        inquirer.Checkbox(
+            "solns",
+            message="What solutions are you deploying (select multiple with spacebar)?",
+            choices=list(map_soln_to_csr_names.keys()),
+        )
+    ]
+    answers = inquirer.prompt(questions)
+    for soln in answers["solns"]:
+        config[soln] = {}
+        for csr_name in map_soln_to_csr_names[soln]:
+            questions = [
+                inquirer.Text(
+                    f"{csr_name}_commonName", message=f"Enter {csr_name} common name"
+                ),
+                inquirer.Text(
+                    f"{csr_name}_SubjectAlternateName",
+                    message=f"Enter {csr_name} subject alternate name(s) (can be a csv)",
+                    validate=validate_subjaltname,
+                ),
+            ]
+            answers = inquirer.prompt(questions)
+            config[soln].update(answers)
+    return config
+
+
+def main():
+
+    parser = ap.ArgumentParser(
+        description="Automated cert generator for various VMWare products"
+    )
+    parser.add_argument(
+        "--print-solns", action="store_true", help="Print supported solutions"
+    )
+    parser.add_argument("--print-template", nargs=1, help="Print template config file")
+    parser.add_argument("file", nargs="?", help="Config file with necessary inputs")
+    args = parser.parse_args()
+
+    if args.print_solns:
+        print("Supported solutions:")
+        for soln in map_soln_to_csr_names.keys():
+            print(f" - {soln}")
+        quit()
+
+    if args.print_template:
+        with open("config_template.ini", "r") as f:
+            print(f.read())
+        quit()
+
+    if args.file is None:
+        config = prompt_user_for_inputs()
+    else:
+        if not os.path.exists(args.file):
+            raise ValueError(f"Path {args.file} does not exist")
+        if not os.path.isfile(args.file):
+            raise ValueError(f"Path {args.file} not a regular file")
+        config = configparser.ConfigParser(delimiters=("=",))
+        config.read(args.file)
+        config = dict(config)
+
+    print(args)
+    print("config = {}".format(config))
+
     # This generates all the Certificate Signing Requests (.csr files) and the private
     # keys.
-    for soln in answers["solns"]:
+    common_conf_keys = (
+        "countryName",
+        "stateOrProvinceName",
+        "localityName",
+        "organizationName",
+        "organizationalUnitName",
+    )
+    common_conf = {k: config["DEFAULT"][k] for k in common_conf_keys}
+    for soln in config.keys():
+        if soln == "DEFAULT":
+            continue
+        print("soln = {}".format(soln))
         out = os.path.join("certs", soln)
         print("out = {}".format(out))
         if not os.path.isdir(out):
             os.makedirs(out)
         print(f"Generating certificate signing requests for {soln}")
-        names = map_soln_to_csr_names[soln]
-        for name in names:
-            generate_new_csr_and_key(out, name, answers["sslconfig"])
-
-    # questions = [
-    #   inquirer.Text('fqdn', message="CA Server FQDN"),
-    #   inquirer.Text('username', message="Domain Admin Username"),
-    #   inquirer.Text('password', message="Domain Admin Password"),
-    # ]
-    # srv_info = inquirer.prompt(questions)
+        for name in map_soln_to_csr_names[soln]:
+            soln_info = config[soln]
+            csr_conf = copy.copy(common_conf)
+            common_name_key = f"{name.lower()}_commonname"
+            san_key = f"{name.lower()}_subjectalternatename"
+            # Must add the common name to the list of subject alternate names
+            san_str = "DNS:" + soln_info[common_name_key] + "," + soln_info[san_key]
+            csr_conf["subjectAltName"] = san_str 
+            csr_conf["commonName"] = soln_info[common_name_key]
+            print("csr_conf = {}".format(csr_conf))
+            generate_new_csr_and_key(out, name, csr_conf)
 
     print("BEGINNING SIGNING PROCESS ...")
-    questions = [
-        inquirer.List(
-            "ca",
-            message="What kind of certificate authority are you using?",
-            choices=["Self Signed", "Microsoft CA"],
-        )
-    ]
-
-    answers = inquirer.prompt(questions)
     func_lookup = {
-        "Self Signed": generate_self_signed_certs,
-        "Microsoft CA": submit_all_csrs_to_microsoft_ca,
+        "self_signed": generate_self_signed_certs,
+        "microsoft_ca": submit_all_csrs_to_microsoft_ca,
     }
-    func_lookup[answers["ca"]](os.path.abspath("certs"))
-    # submit_all_csrs_in_dir(os.path.abspath("certs"))
+    ca = config["DEFAULT"]["ca"]
+    if ca not in func_lookup:
+        raise ValueError(f"Unsupported CA {ca}")
+    func_lookup[ca](os.path.abspath("certs"), config)
 
 
 if __name__ == "__main__":
