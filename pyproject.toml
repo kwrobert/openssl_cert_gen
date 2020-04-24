@@ -1,0 +1,17 @@
+[metadata]
+name = 'certgen'
+version = '0.0.1'
+description = 'Automated certificate generation and signing for VMWare products'
+author = 'Kyle Robertson'
+author_email = 'kyle.robertson@wei.com'
+license = 'MIT'
+url = 'https://github.com/kwrobert/certgen'
+
+[requires]
+python_version = ['2.7', '3.5', '3.6', 'pypy', 'pypy3']
+
+[build-system]
+requires = ['setuptools', 'wheel']
+
+[tool.hatch.commands]
+prerelease = 'hatch build'
