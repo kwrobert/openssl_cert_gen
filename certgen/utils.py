@@ -1,6 +1,29 @@
 import subprocess
 import os
 
+conf_template = """
+[ req ]
+default_bits = 2048
+default_keyfile = {solution_name}.key
+distinguished_name = req_distinguished_name
+encrypt_key = no
+prompt = no
+string_mask = nombstr
+req_extensions = v3_req
+[ v3_req ]
+basicConstraints = CA:FALSE
+keyUsage = digitalSignature, keyEncipherment, dataEncipherment, nonRepudiation
+extendedKeyUsage = serverAuth, clientAuth
+subjectAltName = {subjectAltName}
+[ req_distinguished_name ]
+countryName = {countryName}
+stateOrProvinceName = {stateOrProvinceName}
+localityName = {localityName}
+0.organizationName = {organizationName}
+organizationalUnitName = {organizationalUnitName}
+commonName = {commonName}
+"""
+
 def run_subprocess_with_output(cmd):
     print("Running command: {}".format(cmd))
     try:
