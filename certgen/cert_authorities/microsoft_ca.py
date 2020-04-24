@@ -15,12 +15,17 @@ class MicrosoftCA:
             opts.add_experimental_option("prefs", prefs)
         # opts.set_headless()
         # assert opts.headless
+        print(opts)
+        print("opening browser")
         self.browser = Chrome(options=opts)
         self.wait = WebDriverWait(self.browser, 100)
         self.URL = "https://{}:{}@{}/certsrv".format(user, passwd, fqdn)
+        print("browser open")
 
     def navigate_to_homepage(self):
+        print("navigate to homepage")
         self.browser.get(self.URL)
+        print("homepage open")
 
     def navigate_to_cert_sign_page_from_homepage(self):
         self.browser.find_element_by_link_text("Request a certificate").click()
