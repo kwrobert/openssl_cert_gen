@@ -22,21 +22,9 @@ rm /usr/local/bin/selenium-server-standalone.jar
 # Install dependencies.
 yum update
 yum install epel-release
-yum install -f -y unzip java-1.8.0-openjdk-headless chromedriver chromium xorg-x11-server-Xvfb
+yum install -y unzip java-1.8.0-openjdk-headless chromedriver chromium xorg-x11-server-Xvfb python3
 
 # Install Chrome.
-curl -sS -o - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add
-echo "deb http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list
-apt-get -y update
-apt-get -y install google-chrome-stable
-
-# Install ChromeDriver.
-wget -N http://chromedriver.storage.googleapis.com/$CHROME_DRIVER_VERSION/chromedriver_linux64.zip -P ~/
-unzip ~/chromedriver_linux64.zip -d ~/
-rm ~/chromedriver_linux64.zip
-mv -f ~/chromedriver /usr/local/bin/chromedriver
-chown root:root /usr/local/bin/chromedriver
-chmod 0755 /usr/local/bin/chromedriver
 
 # Install Selenium Server. This is only necessary if you want to use this as a
 # remote host for running a Web Driver that other clients will connect to.
