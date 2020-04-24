@@ -46,7 +46,7 @@ kwargs = {
     'install_requires': REQUIRES,
     'tests_require': ['coverage', 'pytest'],
     'packages': find_packages(exclude=('tests', 'tests.*')),
-    'include_package_data'=True,
+    'include_package_data': True,
     'entry_points': {
         'console_scripts': [
             'certgen = certgen.cli:certgen',
