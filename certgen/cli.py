@@ -59,6 +59,7 @@ def submit_all_csrs_to_microsoft_ca(csr_dir, config):
     assert "microsoft_ca_address" in info
     assert "microsoft_ca_username" in info
     assert "microsoft_ca_password" in info
+    assert "microsoft_ca_template_name" in info
     print("info = {}".format(dict(info)))
 
     # This submits the CSR to the CA for the environment. The CA signing the
@@ -77,7 +78,7 @@ def submit_all_csrs_to_microsoft_ca(csr_dir, config):
             cert_contents = f.read()
         ca_srvr.navigate_to_homepage()
         ca_srvr.navigate_to_cert_sign_page_from_homepage()
-        ca_srvr.fill_out_signing_page_and_download(cert_contents, "Web Server")
+        ca_srvr.fill_out_signing_page_and_download(cert_contents, info["microsoft_ca_template_name"])
         # wait to finish downloading before moving
         time.sleep(3)
         # Rename downloaded certs
