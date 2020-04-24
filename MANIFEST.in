@@ -1,2 +1,3 @@
 include README.rst
 include LICENSE-MIT
+recursive-include certgen/data/
