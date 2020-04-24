@@ -1,4 +1,5 @@
 blessings==1.7
+-e git+https://github.com/kwrobert/openssl_cert_gen.git@879a66aaac2699e9193e027c82ec68133af89ac9#egg=certgen
 inquirer==2.6.3
 python-editor==1.0.4
 readchar==2.0.1

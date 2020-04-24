@@ -13,13 +13,10 @@ import sys
 
 import argparse as ap
 
-from selenium.webdriver import Chrome
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.support.ui import WebDriverWait, Select
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.action_chains import ActionChains
-from selenium.webdriver.support import expected_conditions as EC
+from certgen.cert_authorities.microsoft_ca import MicrosoftCA
+from certgen.cert_authorities.self_signed import generate_self_signed_certs_from_dir
+from certgen.utils import generate_new_csr_and_key, convert_cert_chain_to_base64_pem
+
 
 map_soln_to_csr_names = {
     "vRealize_Automation_Medium_Distributed": [
@@ -56,52 +53,7 @@ organizationalUnitName = {organizationalUnitName}
 commonName = {commonName}
 """
 
-class MicrosoftCA:
-    def __init__(self, fqdn, user, passwd, download_dir=None):
-        opts = Options()
-        if download_dir is not None:
-            print(f"Changing download dir to {download_dir}!")
-            prefs = {"download.default_directory": download_dir}
-            opts.add_experimental_option("prefs", prefs)
-        # opts.set_headless()
-        # assert opts.headless
-        self.browser = Chrome(options=opts)
-        self.wait = WebDriverWait(self.browser, 100)
-        self.URL = "https://{}:{}@{}/certsrv".format(user, passwd, fqdn)
-
-    def navigate_to_homepage(self):
-        self.browser.get(self.URL)
-
-    def navigate_to_cert_sign_page_from_homepage(self):
-        self.browser.find_element_by_link_text("Request a certificate").click()
-        self.browser.find_element_by_link_text("advanced certificate request").click()
-
-    def fill_out_signing_page_and_download(self, cert_contents, cert_template):
-        """
-        Fills out cert signing page and downloads signed cert and cert chain
-        """
-
-        print("Fill out page")
-        # Fill out text area with cert contents
-        text_area = self.browser.find_element_by_id("locTaRequest")
-        text_area.send_keys(cert_contents)
-        # Select the cert tempalte
-        template_select = Select(self.browser.find_element_by_id("lbCertTemplateID"))
-        for opt in template_select.options:
-            if opt.text == cert_template:
-                opt.click()
-                break
-        else:
-            raise RuntimeError(f"Not certificate templates named {cert_template}")
-        self.browser.find_element_by_id("btnSubmit").click()
-        # Select base 64 encoded and download
-        self.browser.find_element_by_id("rbB64Enc").click()
-        self.browser.find_element_by_link_text("Download certificate").click()
-        self.browser.find_element_by_link_text("Download certificate chain").click()
-
-
 # log.basicConfig(filename='cert_gen.log',level=log.DEBUG)
-
 
 
 def validate_subjaltname(answers, current):
@@ -120,65 +72,6 @@ def validate_countryname(answers, current):
         print("Country name must be only 2 characters long")
         valid = False
     return valid
-
-
-def generate_new_csr_and_key(outdir, name, config):
-    """
-    Generate a new certificate configuration and certificate in `outdir` using `name`
-    for the name of all files without the extension
-    """
-
-    print("Generating csr and key {}".format(name))
-    # Write the config file
-    conf_path = os.path.join(outdir, name + ".cfg")
-    key_path = os.path.join(outdir, name + ".key.encrypted")
-    csr_path = os.path.join(outdir, name + ".csr")
-    with open(conf_path, "w") as f:
-        f.write(conf_template.format(solution_name=name, **config))
-    # Make the keys
-    cmd = (
-        "openssl req -new -nodes -out {csr_path} -keyout {key_path} -config "
-        "{conf_path}"
-    )
-    cmd = cmd.format(key_path=key_path, csr_path=csr_path, conf_path=conf_path)
-    print("cmd = {}".format(cmd))
-    try:
-        output = subprocess.check_output(cmd, shell=True)
-    except subprocess.CalledProcessError as e:
-        print("FAILED COMMAND: {}".format(e.cmd))
-        print("COMMAND OUTPUT: {}".format(e.output))
-        print("COMMAND STDOUT: {}".format(e.stdout))
-        print("COMMAND STDERR: {}".format(e.stderr))
-        raise
-    print("output = {}".format(output))
-    # Decrypt the private key
-    cmd = "openssl rsa -in {key_path} -out {out_path}"
-    cmd = cmd.format(key_path=key_path, out_path=key_path[0 : key_path.rfind(".")])
-    subprocess.check_output(cmd, shell=True)
-
-
-def convert_ca_cert_chain_to_base64_pem(infile, outfile=""):
-    """
-    Converts the CA Certificate Chain contained in `infile` to the standard Base 64
-    encoded X.509 format
-    """
-
-    infile_path, infile_ext = os.path.splitext(infile)
-    if not outfile:
-        outfile = infile_path + "_pem_cert_chain.cer"
-    # Maps infile extensions to the command required to convert them to PEM format. This
-    # isn't fool proof because users can put any extension they want on a file, but that
-    # doesn't mean it's actually in that format
-    # TODO: Find a way to identify format of infile from its contents
-    cmds = {"p7b": "openssl pkcs7 -print_certs -in {infile} -out {outfile}"}
-    try:
-        cmd = cmds[infile_ext.strip(".")]
-    except KeyError as e:
-        e.args = ("Cannot convert CA Cert chain from {} format".format(infile_ext),)
-        raise
-    cmd = cmd.format(infile=infile, outfile=outfile)
-    subprocess.check_output(cmd, shell=True)
-    return outfile
 
 
 def submit_all_csrs_to_microsoft_ca(csr_dir, config):
@@ -232,24 +125,8 @@ def submit_all_csrs_to_microsoft_ca(csr_dir, config):
         shutil.move(cert_chain_download_path, cert_chain_new_name)
         # Finally, convert the PKCS #7 cert chain provided by Microsoft CAs to PEM
         # format
-        convert_ca_cert_chain_to_base64_pem(cert_chain_new_name)
+        convert_cert_chain_to_base64_pem(cert_chain_new_name)
     ca_srvr.browser.quit()
-    return
-
-
-def generate_self_signed_certs(csr_dir, config):
-    """
-    """
-    csr_files = glob.glob(os.path.join(csr_dir, "**", "*.csr"))
-    print("csr_files = {}".format(csr_files))
-    for csr in csr_files:
-        name, ext = os.path.splitext(csr)
-        certfile = name + ".cert"
-        keyfile = name + ".key"
-        cmd = "openssl x509 -in {} -out {} -req -signkey {} -days 1001".format(
-            csr, certfile, keyfile
-        )
-        subprocess.check_output(cmd, shell=True)
 
 
 def prompt_user_for_inputs():
@@ -278,9 +155,15 @@ def prompt_user_for_inputs():
     config["DEFAULT"]["ca"] = answers["ca"]
     if answers["ca"] == "microsoft_ca":
         questions = [
-            inquirer.Text("microsoft_ca_address", message="Enter Microsoft CA IP or FQDN"),
-            inquirer.Text("microsoft_ca_username", message="Enter Microsoft CA username"),
-            inquirer.Text("microsoft_ca_password", message="Enter Microsoft CA password"),
+            inquirer.Text(
+                "microsoft_ca_address", message="Enter Microsoft CA IP or FQDN"
+            ),
+            inquirer.Text(
+                "microsoft_ca_username", message="Enter Microsoft CA username"
+            ),
+            inquirer.Text(
+                "microsoft_ca_password", message="Enter Microsoft CA password"
+            ),
         ]
         answers = inquirer.prompt(questions)
         config["DEFAULT"].update(answers)
@@ -314,13 +197,14 @@ def prompt_user_for_inputs():
 def certgen():
 
     parser = ap.ArgumentParser(
-        description="Automated cert generator for various VMWare products"
+        description=("Automated cert generator for various VMWare products. Accepts INI "
+                     "file or prompts user for inputs")
     )
     parser.add_argument(
         "--print-solns", action="store_true", help="Print supported solutions"
     )
-    parser.add_argument("--print-template", nargs=1, help="Print template config file")
-    parser.add_argument("file", nargs="?", help="Config file with necessary inputs")
+    parser.add_argument("--print-template", action="store_true", help="Print template config file")
+    parser.add_argument("file", nargs="?", help="Config file in INI format with inputs")
     args = parser.parse_args()
 
     if args.print_solns:
@@ -330,7 +214,8 @@ def certgen():
         quit()
 
     if args.print_template:
-        with open("config_template.ini", "r") as f:
+        template_path = os.path.join(os.path.dirname(__file__), "data", "config_template.ini")
+        with open(template_path, "r") as f:
             print(f.read())
         quit()
 
@@ -374,14 +259,14 @@ def certgen():
             san_key = f"{name.lower()}_subjectalternatename"
             # Must add the common name to the list of subject alternate names
             san_str = "DNS:" + soln_info[common_name_key] + "," + soln_info[san_key]
-            csr_conf["subjectAltName"] = san_str 
+            csr_conf["subjectAltName"] = san_str
             csr_conf["commonName"] = soln_info[common_name_key]
             print("csr_conf = {}".format(csr_conf))
             generate_new_csr_and_key(out, name, csr_conf)
 
     print("BEGINNING SIGNING PROCESS ...")
     func_lookup = {
-        "self_signed": generate_self_signed_certs,
+        "self_signed": generate_self_signed_certs_from_dir,
         "microsoft_ca": submit_all_csrs_to_microsoft_ca,
     }
     ca = config["DEFAULT"]["ca"]
